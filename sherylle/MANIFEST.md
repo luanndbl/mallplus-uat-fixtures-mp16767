@@ -16,8 +16,8 @@ Base URL (byte-stable, never re-encodes): `https://raw.githubusercontent.com/lua
 | TC05-A | NarrowTallBel1.jpg | JPEG | 800×6000 | 489,058 | 76998a82b9ba | unchanged |
 | TC05-B | NarrowTallAbove1.2.jpg | JPEG | 800×6000 | 3,554,803 | 67cd58b086b1 | still 800×6000, re-encoded under 1,048,576 B, text readable |
 | TC06 | WideTall.jpg | JPEG | 2400×10000 | 2,148,696 | 7e3f08f6e5d4 | about 2000×8333, smaller |
-| TC07 | LargeJPG-exif-orientation-6.jpg | JPEG, EXIF Orientation=6 | 4000×3000 as stored (3000×4000 upright) | 2,635,098 | 0698c3d9141e | stored upright about 2000×2667, no EXIF rotation left |
-| TC07 | SmallJPG-exif-orientation-6.jpg | JPEG, EXIF Orientation=6 | 900×600 as stored (600×900 upright) | 41,208 | 286d0829ed2a | stored upright 600×900 (re-encoded even though small: rotation wins) |
+| TC07 | LargeJPG-exif-orientation-6.jpg (v2, 2026-10-16 17:40) | JPEG, pixels stored sideways 3000×4000 + EXIF Orientation=6 (viewers show it upright 4000×3000) | 3000×4000 stored / 4000×3000 upright | 945,162 | 841a73fc9361 | stored UPRIGHT 2000×1500 (width measured after rotation), EXIF removed, under 1 MB |
+| TC07 | SmallJPG-exif-orientation-6.jpg (v2, 2026-10-16 17:40) | JPEG, pixels stored sideways 600×900 + EXIF Orientation=6 (viewers show it upright 900×600) | 600×900 stored / 900×600 upright | 65,500 | 2183510f7bd7 | stored UPRIGHT 900×600, EXIF removed, re-encoded even though small (rotation wins) |
 | TC08 | playstation_transparent_small.png | PNG RGBA | 650×750 | 168,081 | 574479b913e7 | unchanged PNG, transparency intact |
 | TC08 | playstation_transparent_large.png | PNG RGBA | 2200×2400 | 653,779 | 6f1a87d486fc | stays PNG with transparency, width stepped to 2000 or less (never below 600); if still over 1 MB at the floor the original bytes are kept |
 | TC09 | webp_1536x1024_under_1MB.webp | WebP (lossy) | 1536×1024 | 23,200 | 3972886e4bcd | unchanged (WebP is not re-encoded) |
@@ -29,3 +29,5 @@ Base URL (byte-stable, never re-encodes): `https://raw.githubusercontent.com/lua
 | TC14 / TC11 | option_picture_over_2MB.jpg | JPEG | 2000×2000 | 10,513,400 | bc278d0bd7ac | REJECTED by the existing size limit (over 5 MB); not a shrink case |
 
 Not coverable with product photos (developer-side fixtures): TC10 "header declaring over 40 MP" and "recompressed result larger than the input"; TC11 "variation image still over 2 MB after processing" (the ladder brings any photo under 40 MP below 1 MB, so this needs a synthetic noise image); TC09 AVIF / animated GIF (backend tests).
+
+**TC07 note (2026-10-16 17:40):** the first EXIF-6 variants were wrong on our side: they carried an Orientation=6 tag on pixels that were already upright, so the server correctly rotated them and the result looked sideways on staging (c.83647). The files above are rebuilt with the pixels pre-rotated, so after the server bakes the rotation the picture is upright. Expected now: large → 2000×1500 upright (landscape source), small → 900×600 upright.
