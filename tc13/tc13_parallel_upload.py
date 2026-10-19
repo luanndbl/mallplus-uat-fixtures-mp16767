@@ -58,6 +58,8 @@ def http(method, url, body=None, headers=None, timeout=120):
             return r.status, raw, (time.perf_counter() - t0) * 1000
     except urllib.error.HTTPError as e:
         return e.code, e.read(), (time.perf_counter() - t0) * 1000
+    except (urllib.error.URLError, OSError) as e:  # connection reset / timeout / no VPN
+        return 0, str(e).encode(), (time.perf_counter() - t0) * 1000
 
 
 def one_upload(i, api, token, product_id, path, mime, size, data):
