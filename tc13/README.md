@@ -17,9 +17,16 @@ and the three fixtures from `…/main/sherylle/<file>`.
 
 ## Steps
 
-1. **Seller JWT**: log in to the staging Seller Center, open DevTools → Network, click any request to
-   `staging-api.mallplus.ph/vendor/...` and copy the `Authorization: Bearer <token>` value (without `Bearer `).
-   `export SELLER_JWT='<token>'` (Windows PowerShell: `$env:SELLER_JWT='<token>'`).
+1. **Seller auth**: the Seller Center logs in with a session cookie, so DevTools shows no Bearer header. Get a
+   token from the API instead:
+   ```
+   python3 tc13_parallel_upload.py login --api https://staging-api.mallplus.ph --identifier <seller email>
+   ```
+   It prompts for the password and prints the token: `export SELLER_JWT='<token>'`
+   (Windows PowerShell: `$env:SELLER_JWT='<token>'`). Tokens last 8 hours.
+   If the seller logs in by phone OTP, use the browser session instead: DevTools → Application → Cookies →
+   copy the `seller_token` value, then add `--cookie '<value>' --origin https://<the Seller Center URL you are on>`
+   to every `upload` call (cookie writes are CSRF-checked against that Origin).
 2. **Test product**: use a throw-away product of that seller (for example `prod_01M51XEKX8S0EBY7976C70EKS3`).
    Every commit replaces that product's `images[]`, so do not use a real listing.
 3. **Terminal 1 — health poll** (start it first, keep it running for the whole batch, Ctrl-C after):

@@ -11,7 +11,9 @@ Standard library only (Python 3.8+). Two modes:
             second terminal for the whole upload window; it prints p50 / p95 / max.
 
 Examples (staging):
-  export SELLER_JWT='eyJ...'            # Seller Center -> DevTools -> Authorization header of any /vendor call
+  python3 tc13_parallel_upload.py login --api https://staging-api.mallplus.ph --identifier seller@example.com
+  export SELLER_JWT='<token printed above>'   # the Seller Center itself uses a session cookie, not a Bearer header
+  # alternative without a password: --cookie '<seller_token cookie value>' --origin https://<seller-center-host>  on every upload call
   python3 tc13_parallel_upload.py health --api https://staging-api.mallplus.ph --out health-a.csv
   python3 tc13_parallel_upload.py upload --api https://staging-api.mallplus.ph \
       --products prod_01M51XEKX8S0EBY7976C70EKS3 --file performance_2000x1500.jpg --count 20 --out batch-a.csv
@@ -39,7 +41,25 @@ import time
 import urllib.error
 import urllib.request
 
-FILE_TYPE = "VENDOR_PRODUCT_IMAGE"
+FILE_TYPE = "vd-pdimg"  # the presign API's value for VENDOR_PRODUCT_IMAGE (Sherylle confirmed on TC14)
+
+
+def auth_headers(a):
+    """Bearer token (from `login` or SELLER_JWT) or the Seller Center's session cookie.
+
+    Cookie mode needs the Origin header: cookie-authenticated writes are CSRF-checked
+    against the Seller Center origin, so pass the URL you are logged in at.
+    """
+    token = getattr(a, "token", None) or os.environ.get("SELLER_JWT")
+    cookie = getattr(a, "cookie", None) or os.environ.get("SELLER_COOKIE")
+    if token:
+        return {"Authorization": f"Bearer {token}"}
+    if cookie:
+        if not getattr(a, "origin", None):
+            sys.exit("--cookie needs --origin <Seller Center URL you are logged in at>, e.g. https://staging-seller.mallplus.ph")
+        value = cookie if "=" in cookie else f"seller_token={cookie}"
+        return {"Cookie": value, "Origin": a.origin.rstrip("/"), "Referer": a.origin.rstrip("/") + "/"}
+    sys.exit("no auth: run `login` first and export SELLER_JWT, or pass --cookie (seller_token cookie value) with --origin")
 
 
 def http(method, url, body=None, headers=None, timeout=120):
@@ -62,8 +82,7 @@ def http(method, url, body=None, headers=None, timeout=120):
         return 0, str(e).encode(), (time.perf_counter() - t0) * 1000
 
 
-def one_upload(i, api, token, product_id, path, mime, size, data):
-    auth = {"Authorization": f"Bearer {token}"}
+def one_upload(i, api, auth, product_id, path, mime, size, data):
     name = f"tc13-{int(time.time())}-{i:02d}-{os.path.basename(path)}"
     row = {"n": i, "product": product_id, "file": os.path.basename(path), "bytes": size}
     t_start = time.perf_counter()
@@ -109,17 +128,33 @@ def one_upload(i, api, token, product_id, path, mime, size, data):
     return row
 
 
+def cmd_login(a):
+    """POST /auth/seller/login with the seller email + password; prints the bearer token."""
+    import getpass
+    password = a.password or os.environ.get("SELLER_PASSWORD") or getpass.getpass("seller password: ")
+    st, raw, ms = http("POST", f"{a.api}/auth/seller/login", {"identifier": a.identifier, "password": password})
+    try:
+        body = json.loads(raw)
+    except Exception:
+        body = {}
+    if st == 200 and body.get("token"):
+        print(body["token"])
+        print(f"# token ok ({round(ms)} ms, expires_in {body.get('expires_in')}). Use it:  export SELLER_JWT='<token above>'", file=sys.stderr)
+        return
+    if body.get("otp_required"):
+        sys.exit("this seller logs in with a phone OTP; use the browser session instead: --cookie <seller_token cookie value> --origin <Seller Center URL>")
+    sys.exit(f"login failed: HTTP {st} {raw[:200].decode(errors='replace')}")
+
+
 def cmd_upload(a):
-    token = a.token or os.environ.get("SELLER_JWT")
-    if not token:
-        sys.exit("seller JWT missing: --token or SELLER_JWT")
+    auth = auth_headers(a)
     data = open(a.file, "rb").read()
     mime = mimetypes.guess_type(a.file)[0] or "application/octet-stream"
     products = [p.strip() for p in a.products.split(",") if p.strip()]
     print(f"{a.count} parallel uploads of {a.file} ({len(data)} B, {mime}) -> {a.api}  products={products}")
     t0 = time.perf_counter()
     with cf.ThreadPoolExecutor(max_workers=a.count) as ex:
-        rows = list(ex.map(lambda i: one_upload(i, a.api, token, products[i % len(products)], a.file, mime, len(data), data),
+        rows = list(ex.map(lambda i: one_upload(i, a.api, auth, products[i % len(products)], a.file, mime, len(data), data),
                            range(1, a.count + 1)))
     wall = time.perf_counter() - t0
     keys = ["n", "product", "file", "bytes", "presign_status", "presign_ms", "put_status", "put_ms",
@@ -165,9 +200,16 @@ def cmd_health(a):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
+    lg = sub.add_parser("login", help="get the seller bearer token from email + password")
+    lg.add_argument("--api", default="https://staging-api.mallplus.ph")
+    lg.add_argument("--identifier", required=True, help="seller login email (or phone)")
+    lg.add_argument("--password", help="seller password (or env SELLER_PASSWORD; prompted if absent)")
+    lg.set_defaults(fn=cmd_login)
     u = sub.add_parser("upload")
     u.add_argument("--api", default="https://staging-api.mallplus.ph")
-    u.add_argument("--token", help="seller JWT (or env SELLER_JWT)")
+    u.add_argument("--token", help="seller JWT (or env SELLER_JWT), from `login`")
+    u.add_argument("--cookie", help="alternative: the Seller Center's seller_token cookie value (or env SELLER_COOKIE)")
+    u.add_argument("--origin", help="with --cookie: the Seller Center URL you are logged in at (CSRF Origin check)")
     u.add_argument("--products", required=True, help="product id(s), comma separated, round-robin")
     u.add_argument("--file", required=True, help="fixture to upload")
     u.add_argument("--count", type=int, default=20)
